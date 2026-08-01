@@ -13,7 +13,7 @@ import java.time.Duration;
 
 public class UpdateManager {
 
-    private static final String API_URL = "https://github.com/ShiningPr1sm/Media-Downloader/releases/latest";
+    private static final String API_URL = "https://api.github.com/repos/ShiningPr1sm/Media-Downloader/releases/latest";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     public record ReleaseInfo(String version, String notesMarkdown, String downloadUrl) {}
@@ -26,6 +26,7 @@ public class UpdateManager {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(API_URL))
                     .header("Accept", "application/vnd.github+json")
+                    .header("User-Agent", "MediaDownloader")
                     .timeout(Duration.ofSeconds(10))
                     .build();
 

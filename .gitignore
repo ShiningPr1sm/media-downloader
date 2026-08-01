@@ -5,6 +5,7 @@
 # IDEA project files
 *.iml
 .idea/
+dependency-reduced-pom.xml
 
 # OS-specific files
 .DS_Store

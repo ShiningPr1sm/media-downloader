@@ -1,5 +1,6 @@
 package ua.shiningpr1sm;
 
+import com.alibaba.fastjson.JSON;
 import com.formdev.flatlaf.FlatLightLaf;
 
 import javax.imageio.ImageIO;
@@ -8,16 +9,24 @@ import java.awt.*;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public class JavaVideoDownloader {
+    private static final Logger LOG = Logger.getLogger(JavaVideoDownloader.class.getName());
+    private static final String USER_AGENT = "MediaDownloader/3.0.3";
+
     private static final String COMPANY_NAME = "ShiningPr1sm";
     private static final String APPDATA = System.getenv("APPDATA");
     private static final File SHARED_ROOT = new File(APPDATA, COMPANY_NAME);
@@ -31,12 +40,14 @@ public class JavaVideoDownloader {
     private static final File FFMPEG_EXE = new File(FFMPEG_DIR, "ffmpeg.exe");
     private static final String FFMPEG_ZIP_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
 
+    private volatile Process currentProcess;
+    private volatile boolean cancelled;
+
     public JavaVideoDownloader() {
         try {
             UIManager.setLookAndFeel(new FlatLightLaf());
         } catch (UnsupportedLookAndFeelException e) {
-            System.err.println("Error setting LookAndFeel: " + e.getMessage());
-            e.printStackTrace();
+            LOG.log(Level.SEVERE, "Error setting LookAndFeel", e);
         }
 
         String currentVer = ConfigManager.getInternalVersion();
@@ -58,19 +69,18 @@ public class JavaVideoDownloader {
                 Image icon = ImageIO.read(resource);
                 frame.setIconImage(icon);
             } else {
-                System.err.println("Icon resource not found: /project_icon.png");
+                LOG.warning("Icon resource not found: /project_icon.png");
             }
         } catch (IOException e) {
-            System.err.println("Error loading icon: " + e.getMessage());
-            e.printStackTrace();
+            LOG.log(Level.SEVERE, "Error loading icon", e);
         }
 
         final File[] downloadFolder = {new File(System.getProperty("user.home"), "Downloads/")};
         if (!downloadFolder[0].exists()) {
             downloadFolder[0].mkdirs();
-            System.out.println("Created download directory: " + downloadFolder[0].getAbsolutePath());
+            LOG.info("Created download directory: " + downloadFolder[0].getAbsolutePath());
         } else {
-            System.out.println("Download directory exists: " + downloadFolder[0].getAbsolutePath());
+            LOG.info("Download directory exists: " + downloadFolder[0].getAbsolutePath());
         }
 
         JTextArea textArea = new JTextArea();
@@ -106,7 +116,22 @@ public class JavaVideoDownloader {
         JPanel progressPanel = new JPanel(new BorderLayout());
         progressPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 5, 10));
         progressPanel.add(progressBar, BorderLayout.CENTER);
-        frame.add(progressPanel, BorderLayout.CENTER);
+
+        JTextArea logArea = new JTextArea();
+        logArea.setEditable(false);
+        logArea.setFont(new Font("Consolas", Font.PLAIN, 11));
+        logArea.setForeground(Color.DARK_GRAY);
+        logArea.setBackground(new Color(250, 250, 250));
+        JScrollPane logScrollPane = new JScrollPane(logArea);
+        logScrollPane.setPreferredSize(new Dimension(500, 100));
+        logScrollPane.setBorder(BorderFactory.createTitledBorder("Log"));
+
+        JPanel centerPanel = new JPanel(new BorderLayout());
+        centerPanel.add(progressPanel, BorderLayout.NORTH);
+        centerPanel.add(logScrollPane, BorderLayout.CENTER);
+        frame.add(centerPanel, BorderLayout.CENTER);
+
+        setupLogRedirect(logArea);
 
         JPanel bottomPanel = new JPanel();
         bottomPanel.setLayout(new BoxLayout(bottomPanel, BoxLayout.X_AXIS));
@@ -125,8 +150,13 @@ public class JavaVideoDownloader {
         formatBox.setPreferredSize(new Dimension(200, ROW_HEIGHT));
 
         JButton downloadButton = new JButton("Download");
-        downloadButton.setPreferredSize(new Dimension(320, ROW_HEIGHT));
-        downloadButton.setMaximumSize(new Dimension(320, ROW_HEIGHT));
+        downloadButton.setPreferredSize(new Dimension(120, ROW_HEIGHT));
+        downloadButton.setMaximumSize(new Dimension(120, ROW_HEIGHT));
+
+        JButton cancelButton = new JButton("Cancel");
+        cancelButton.setPreferredSize(new Dimension(70, ROW_HEIGHT));
+        cancelButton.setMaximumSize(new Dimension(70, ROW_HEIGHT));
+        cancelButton.setEnabled(false);
 
         ImageIcon thumbIcon = new ImageIcon(
                 Objects.requireNonNull(JavaVideoDownloader.class.getResource("/thumbnail_icon.png"))
@@ -139,23 +169,30 @@ public class JavaVideoDownloader {
 
         String[] browsers = {"None", "Firefox", "Chrome", "Edge", "Opera", "Brave"};
         JComboBox<String> browserComboBox = new JComboBox<>(browsers);
-        browserComboBox.setMaximumSize(new Dimension(120, ROW_HEIGHT));
-        browserComboBox.setPreferredSize(new Dimension(120, ROW_HEIGHT));
-
-        formatBox.setAlignmentY(Component.CENTER_ALIGNMENT);
-        downloadButton.setAlignmentY(Component.CENTER_ALIGNMENT);
-        thumbnailButton.setAlignmentY(Component.CENTER_ALIGNMENT);
-        browserComboBox.setAlignmentY(Component.CENTER_ALIGNMENT);
+        browserComboBox.setMaximumSize(new Dimension(90, ROW_HEIGHT));
+        browserComboBox.setPreferredSize(new Dimension(90, ROW_HEIGHT));
 
         bottomPanel.add(formatBox);
-        bottomPanel.add(Box.createHorizontalStrut(10));
+        bottomPanel.add(Box.createHorizontalStrut(5));
         bottomPanel.add(downloadButton);
-        bottomPanel.add(Box.createHorizontalStrut(10));
+        bottomPanel.add(Box.createHorizontalStrut(5));
+        bottomPanel.add(cancelButton);
+        bottomPanel.add(Box.createHorizontalStrut(7));
         bottomPanel.add(thumbnailButton);
-        bottomPanel.add(Box.createHorizontalStrut(10));
+        bottomPanel.add(Box.createHorizontalStrut(7));
         bottomPanel.add(browserComboBox);
         frame.add(bottomPanel, BorderLayout.SOUTH);
         frame.setVisible(true);
+
+        cancelButton.addActionListener(ev -> {
+            cancelled = true;
+            Process p = currentProcess;
+            if (p != null && p.isAlive()) {
+                p.destroyForcibly();
+            }
+            cancelButton.setEnabled(false);
+            LOG.info("Download cancelled by user");
+        });
 
         downloadButton.addActionListener(e -> {
             String input = textArea.getText().trim();
@@ -170,38 +207,67 @@ public class JavaVideoDownloader {
             String[] urls = input.split("\\r?\\n");
             List<String> videoUrls = new ArrayList<>();
             for (String url : urls) {
-                if (!url.trim().isEmpty()) {
-                    videoUrls.add(url.trim());
+                String trimmed = url.trim();
+                if (!trimmed.isEmpty()) {
+                    if (!isValidUrl(trimmed)) {
+                        JOptionPane.showMessageDialog(frame,
+                                "Invalid URL: " + trimmed,
+                                "Invalid URL",
+                                JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    videoUrls.add(trimmed);
                 }
             }
             if (videoUrls.isEmpty()) {
                 JOptionPane.showMessageDialog(frame, "No valid URLs found!");
-                System.out.println("No valid URLs found after parsing.");
+                LOG.info("No valid URLs found after parsing.");
                 return;
             }
 
+            String browser = Objects.requireNonNull(browserComboBox.getSelectedItem()).toString().toLowerCase();
+            if (!browser.equals("none")) {
+                int result = JOptionPane.showConfirmDialog(frame,
+                        "The app will extract cookies from " + browser + ".\n" +
+                                "This is needed to access age-restricted or logged-in content.\n\n" +
+                                "Continue?",
+                        "Cookie Access",
+                        JOptionPane.OK_CANCEL_OPTION,
+                        JOptionPane.WARNING_MESSAGE);
+                if (result != JOptionPane.OK_OPTION) {
+                    return;
+                }
+            }
+
+            cancelled = false;
             downloadButton.setEnabled(false);
+            cancelButton.setEnabled(true);
             progressBar.setValue(0);
             progressBar.setString("Starting download...");
-            System.out.println("Starting download process for " + videoUrls.size() + " URLs.");
+            LOG.info("Starting download process for " + videoUrls.size() + " URLs.");
 
             new Thread(() -> {
                 try {
+                    if (cancelled) return;
                     checkAndDownloadYTDLP();
+                    if (cancelled) {
+                        restoreButtons(downloadButton, cancelButton, progressBar);
+                        return;
+                    }
                     checkAndDownloadFFMPEG();
                     String selectedFormat = (String) formatBox.getSelectedItem();
-                    String browser = Objects.requireNonNull(browserComboBox.getSelectedItem()).toString().toLowerCase();
-                    System.out.println("Selected format: " + selectedFormat + ", Browser for cookies: " + browser);
+                    LOG.info("Selected format: " + selectedFormat + ", Browser for cookies: " + browser);
 
                     for (int i = 0; i < videoUrls.size(); i++) {
+                        if (cancelled) break;
                         String videoUrl = videoUrls.get(i);
-                        System.out.println("Processing URL " + (i + 1) + "/" + videoUrls.size() + ": " + videoUrl);
+                        LOG.info("Processing URL " + (i + 1) + "/" + videoUrls.size() + ": " + videoUrl);
                         List<String> command = new ArrayList<>();
                         command.add(YTDLP_EXE.getAbsolutePath());
 
                         command.add("--remote-components");
                         command.add("ejs:github");
-                        System.out.println("Adding --remote-components ejs:github for YouTube challenge solving.");
+                        LOG.fine("Adding --remote-components ejs:github for YouTube challenge solving.");
 
                         switch (selectedFormat) {
                             case "Video + Audio":
@@ -216,7 +282,7 @@ public class JavaVideoDownloader {
                                 if (!browser.isEmpty() && !browser.equals("none")) {
                                     command.add("--cookies-from-browser");
                                     command.add(browser);
-                                    System.out.println("Adding --cookies-from-browser " + browser);
+                                    LOG.fine("Adding --cookies-from-browser " + browser);
                                 }
                                 break;
                             case "Video only (muted)":
@@ -229,7 +295,7 @@ public class JavaVideoDownloader {
                                 if (!browser.isEmpty() && !browser.equals("none")) {
                                     command.add("--cookies-from-browser");
                                     command.add(browser);
-                                    System.out.println("Adding --cookies-from-browser " + browser);
+                                    LOG.fine("Adding --cookies-from-browser " + browser);
                                 }
                                 break;
                             case "Audio only (mp3)":
@@ -243,7 +309,7 @@ public class JavaVideoDownloader {
                                 if (!browser.isEmpty() && !browser.equals("none")) {
                                     command.add("--cookies-from-browser");
                                     command.add(browser);
-                                    System.out.println("Adding --cookies-from-browser " + browser);
+                                    LOG.fine("Adding --cookies-from-browser " + browser);
                                 }
                                 break;
                         }
@@ -256,18 +322,19 @@ public class JavaVideoDownloader {
                         command.add(downloadFolder[0].getAbsolutePath() + "/%(title)s_%(id)s_" + timeStamp + ".%(ext)s");
                         command.add(videoUrl);
 
-                        System.out.println("Executing command: " + String.join(" ", command));
+                        LOG.info("Executing command: " + String.join(" ", command));
 
                         ProcessBuilder pb = new ProcessBuilder(command);
                         pb.redirectErrorStream(true);
                         Process process = pb.start();
+                        currentProcess = process;
 
                         BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                         String line;
                         Pattern pattern = Pattern.compile("(\\d{1,3}\\.\\d)%");
                         int videoIndex = i + 1;
                         while ((line = reader.readLine()) != null) {
-                            System.out.println("yt-dlp output: " + line);
+                            LOG.fine("yt-dlp output: " + line);
                             Matcher matcher = pattern.matcher(line);
                             if (matcher.find()) {
                                 int progress = (int) Float.parseFloat(matcher.group(1));
@@ -282,20 +349,29 @@ public class JavaVideoDownloader {
                             }
                         }
                         int exitCode = process.waitFor();
-                        System.out.println("yt-dlp process for " + videoUrl + " finished with exit code: " + exitCode);
+                        currentProcess = null;
+                        LOG.info("yt-dlp process for " + videoUrl + " finished with exit code: " + exitCode);
+
+                        if (exitCode != 0) {
+                            LOG.warning("yt-dlp exited with code " + exitCode + " for URL: " + videoUrl + ", continuing with next URL");
+                            String finalLine2 = "Video " + videoIndex + " failed (exit " + exitCode + "), continuing...";
+                            SwingUtilities.invokeLater(() -> progressBar.setString(finalLine2));
+                        }
                     }
+                    boolean wasCancelled = cancelled;
                     SwingUtilities.invokeLater(() -> {
-                        progressBar.setValue(100);
-                        progressBar.setString("All downloads completed!");
+                        progressBar.setValue(wasCancelled ? 0 : 100);
+                        progressBar.setString(wasCancelled ? "Download cancelled" : "All downloads completed!");
                         downloadButton.setEnabled(true);
-                        System.out.println("All downloads completed successfully!");
+                        cancelButton.setEnabled(false);
+                        LOG.info(wasCancelled ? "Download cancelled" : "All downloads completed!");
                     });
                 } catch (IOException | InterruptedException ex) {
-                    System.err.println("An error occurred during download: " + ex.getMessage());
-                    ex.printStackTrace();
+                    LOG.log(Level.SEVERE, "An error occurred during download", ex);
                     SwingUtilities.invokeLater(() -> {
                         progressBar.setString("Error: " + ex.getMessage());
                         downloadButton.setEnabled(true);
+                        cancelButton.setEnabled(false);
                         JOptionPane.showMessageDialog(frame, "An error occurred: " + ex.getMessage());
                     });
                 }
@@ -315,27 +391,54 @@ public class JavaVideoDownloader {
             String[] urls = input.split("\\r?\\n");
             List<String> videoUrls = new ArrayList<>();
             for (String url : urls) {
-                if (!url.trim().isEmpty()) videoUrls.add(url.trim());
+                String trimmed = url.trim();
+                if (!trimmed.isEmpty()) {
+                    if (!isValidUrl(trimmed)) {
+                        JOptionPane.showMessageDialog(frame,
+                                "Invalid URL: " + trimmed,
+                                "Invalid URL",
+                                JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    videoUrls.add(trimmed);
+                }
             }
             if (videoUrls.isEmpty()) {
                 JOptionPane.showMessageDialog(frame, "No valid URLs found!");
                 return;
             }
 
+            String browser = Objects.requireNonNull(browserComboBox.getSelectedItem()).toString().toLowerCase();
+            if (!browser.equals("none")) {
+                int result = JOptionPane.showConfirmDialog(frame,
+                        "The app will extract cookies from " + browser + ".\n" +
+                                "This is needed to access age-restricted or logged-in content.\n\n" +
+                                "Continue?",
+                        "Cookie Access",
+                        JOptionPane.OK_CANCEL_OPTION,
+                        JOptionPane.WARNING_MESSAGE);
+                if (result != JOptionPane.OK_OPTION) {
+                    return;
+                }
+            }
+
+            cancelled = false;
             thumbnailButton.setEnabled(false);
+            cancelButton.setEnabled(true);
             progressBar.setValue(0);
             progressBar.setString("Starting thumbnail download...");
-            System.out.println("Starting thumbnail download for " + videoUrls.size() + " URLs.");
+            LOG.info("Starting thumbnail download for " + videoUrls.size() + " URLs.");
 
             new Thread(() -> {
                 try {
+                    if (cancelled) return;
                     checkAndDownloadYTDLP();
-                    String browser = browserComboBox.getSelectedItem().toString().toLowerCase();
 
                     for (int i = 0; i < videoUrls.size(); i++) {
+                        if (cancelled) break;
                         String videoUrl = videoUrls.get(i);
                         int videoIndex = i + 1;
-                        System.out.println("Downloading thumbnail for URL " + videoIndex + "/" + videoUrls.size() + ": " + videoUrl);
+                        LOG.info("Downloading thumbnail for URL " + videoIndex + "/" + videoUrls.size() + ": " + videoUrl);
 
                         List<String> command = new ArrayList<>();
                         command.add(YTDLP_EXE.getAbsolutePath());
@@ -355,40 +458,46 @@ public class JavaVideoDownloader {
                         command.add(downloadFolder[0].getAbsolutePath() + "/%(title)s_%(id)s_" + timeStamp + ".%(ext)s");
                         command.add(videoUrl);
 
-                        System.out.println("Executing thumbnail command: " + String.join(" ", command));
+                        LOG.info("Executing thumbnail command: " + String.join(" ", command));
 
                         ProcessBuilder pb = new ProcessBuilder(command);
                         pb.redirectErrorStream(true);
                         Process process = pb.start();
+                        currentProcess = process;
 
                         BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                         String line;
-                        int finalI = i;
                         while ((line = reader.readLine()) != null) {
-                            System.out.println("yt-dlp thumbnail output: " + line);
+                            LOG.fine("yt-dlp thumbnail output: " + line);
                             String finalLine = line;
                             SwingUtilities.invokeLater(() -> progressBar.setString(
                                     "Thumbnail " + videoIndex + " of " + videoUrls.size() + " - " + finalLine.trim()));
                         }
                         int exitCode = process.waitFor();
-                        System.out.println("Thumbnail download for " + videoUrl + " finished with exit code: " + exitCode);
+                        currentProcess = null;
+                        LOG.info("Thumbnail download for " + videoUrl + " finished with exit code: " + exitCode);
+                        if (exitCode != 0) {
+                            LOG.warning("Thumbnail download failed with exit code " + exitCode + " for " + videoUrl);
+                        }
 
-                        int totalProgress = (int) (((double) (finalI + 1) / videoUrls.size()) * 100);
+                        int totalProgress = (int) (((double) (i + 1) / videoUrls.size()) * 100);
                         SwingUtilities.invokeLater(() -> progressBar.setValue(totalProgress));
                     }
 
+                    boolean wasCancelled = cancelled;
                     SwingUtilities.invokeLater(() -> {
-                        progressBar.setValue(100);
-                        progressBar.setString("All thumbnails downloaded!");
+                        progressBar.setValue(wasCancelled ? 0 : 100);
+                        progressBar.setString(wasCancelled ? "Thumbnail download cancelled" : "All thumbnails downloaded!");
                         thumbnailButton.setEnabled(true);
-                        System.out.println("All thumbnails downloaded successfully!");
+                        cancelButton.setEnabled(false);
+                        LOG.info(wasCancelled ? "Thumbnail download cancelled" : "All thumbnails downloaded!");
                     });
                 } catch (IOException | InterruptedException ex) {
-                    System.err.println("Thumbnail download error: " + ex.getMessage());
-                    ex.printStackTrace();
+                    LOG.log(Level.SEVERE, "Thumbnail download error", ex);
                     SwingUtilities.invokeLater(() -> {
                         progressBar.setString("Error: " + ex.getMessage());
                         thumbnailButton.setEnabled(true);
+                        cancelButton.setEnabled(false);
                         JOptionPane.showMessageDialog(frame, "An error occurred: " + ex.getMessage());
                     });
                 }
@@ -396,11 +505,69 @@ public class JavaVideoDownloader {
         });
     }
 
+    private static void restoreButtons(JButton actionButton, JButton cancelBtn, JProgressBar bar) {
+        SwingUtilities.invokeLater(() -> {
+            bar.setValue(0);
+            bar.setString("Cancelled");
+            actionButton.setEnabled(true);
+            cancelBtn.setEnabled(false);
+        });
+    }
+
+    private static void setupLogRedirect(JTextArea logArea) {
+        PrintStream originalOut = System.out;
+        OutputStream out = new OutputStream() {
+            @Override
+            public void write(byte[] b, int off, int len) {
+                originalOut.write(b, off, len);
+                String text = new String(b, off, len);
+                SwingUtilities.invokeLater(() -> {
+                    logArea.append(text);
+                    logArea.setCaretPosition(logArea.getDocument().getLength());
+                });
+            }
+
+            @Override
+            public void write(int b) {
+                originalOut.write(b);
+                SwingUtilities.invokeLater(() -> {
+                    logArea.append(String.valueOf((char) b));
+                    logArea.setCaretPosition(logArea.getDocument().getLength());
+                });
+            }
+        };
+        PrintStream ps = new PrintStream(out, true);
+        System.setOut(ps);
+        System.setErr(ps);
+    }
+
+    private static boolean isValidUrl(String url) {
+        try {
+            URI uri = new URI(url);
+            String scheme = uri.getScheme();
+            return scheme != null && (scheme.equals("http") || scheme.equals("https"));
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+    private static void downloadFile(String urlStr, File target) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(30000);
+        conn.setInstanceFollowRedirects(true);
+        conn.setRequestProperty("User-Agent", USER_AGENT);
+        try (InputStream in = conn.getInputStream();
+             FileOutputStream out = new FileOutputStream(target)) {
+            in.transferTo(out);
+        }
+    }
+
     private static void checkAndDownloadYTDLP() throws IOException, InterruptedException {
-        System.out.println("Checking yt-dlp existence and version...");
+        LOG.info("Checking yt-dlp existence and version...");
         if (!YTDLP_DIR.exists()) {
             YTDLP_DIR.mkdirs();
-            System.out.println("Created yt-dlp directory: " + YTDLP_DIR.getAbsolutePath());
+            LOG.info("Created yt-dlp directory: " + YTDLP_DIR.getAbsolutePath());
         }
 
         String storedVersion = readVersionFile();
@@ -415,45 +582,42 @@ public class JavaVideoDownloader {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 currentInstalledVersion = reader.readLine();
                 process.waitFor();
-                System.out.println("Currently installed yt-dlp version from executable: " + currentInstalledVersion);
+                LOG.info("Currently installed yt-dlp version from executable: " + currentInstalledVersion);
             } catch (Exception e) {
-                System.err.println("Failed to get current installed yt-dlp version from executable. Forcing download. Error: " + e.getMessage());
+                LOG.warning("Failed to get current installed yt-dlp version from executable. Forcing download. Error: " + e.getMessage());
                 needsDownload = true;
             }
         } else {
-            System.out.println("yt-dlp.exe not found. Needs download.");
+            LOG.info("yt-dlp.exe not found. Needs download.");
             needsDownload = true;
         }
 
         if (latestVersion == null) {
-            System.err.println("Could not fetch latest yt-dlp version from GitHub. Skipping online version check.");
+            LOG.warning("Could not fetch latest yt-dlp version from GitHub. Skipping online version check.");
             if (!needsDownload && storedVersion != null && storedVersion.equals(currentInstalledVersion)) {
-                System.out.println("yt-dlp is assumed to be up to date (cannot check online). Installed: " + currentInstalledVersion);
+                LOG.info("yt-dlp is assumed to be up to date (cannot check online). Installed: " + currentInstalledVersion);
             } else if (!YTDLP_EXE.exists() && storedVersion == null) {
                 needsDownload = true;
-                System.out.println("No yt-dlp.exe and no stored version, and cannot get latest online. Attempting download.");
+                LOG.info("No yt-dlp.exe and no stored version, and cannot get latest online. Attempting download.");
             }
         } else {
-            System.out.println("Latest yt-dlp version from GitHub: " + latestVersion);
+            LOG.info("Latest yt-dlp version from GitHub: " + latestVersion);
 
             if (currentInstalledVersion != null && currentInstalledVersion.equals(latestVersion) &&
                     storedVersion != null && storedVersion.equals(latestVersion)) {
-                System.out.println("yt-dlp is up to date according to version file, installed version, and latest online (" + latestVersion + "). No download needed.");
+                LOG.info("yt-dlp is up to date according to version file, installed version, and latest online (" + latestVersion + "). No download needed.");
                 needsDownload = false;
             } else {
-                System.out.println("yt-dlp update required: stored=" + storedVersion + ", installed=" + currentInstalledVersion + ", latest=" + latestVersion);
+                LOG.info("yt-dlp update required: stored=" + storedVersion + ", installed=" + currentInstalledVersion + ", latest=" + latestVersion);
                 needsDownload = true;
             }
         }
 
         if (needsDownload) {
-            System.out.println("Downloading latest yt-dlp from: " + YTDLP_URL);
-            try (InputStream in = new URL(YTDLP_URL).openStream();
-                 FileOutputStream out = new FileOutputStream(YTDLP_EXE)) {
-                in.transferTo(out);
-            }
+            LOG.info("Downloading latest yt-dlp from: " + YTDLP_URL);
+            downloadFile(YTDLP_URL, YTDLP_EXE);
             YTDLP_EXE.setExecutable(true);
-            System.out.println("yt-dlp updated successfully.");
+            LOG.info("yt-dlp updated successfully.");
 
             String versionToWrite = latestVersion;
             if (versionToWrite == null) {
@@ -462,9 +626,9 @@ public class JavaVideoDownloader {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                     versionToWrite = reader.readLine();
                     process.waitFor();
-                    System.out.println("Version from newly downloaded yt-dlp.exe: " + versionToWrite);
+                    LOG.info("Version from newly downloaded yt-dlp.exe: " + versionToWrite);
                 } catch (Exception e) {
-                    System.err.println("Could not get version from newly downloaded yt-dlp.exe: " + e.getMessage());
+                    LOG.warning("Could not get version from newly downloaded yt-dlp.exe: " + e.getMessage());
                     versionToWrite = "unknown_download";
                 }
             }
@@ -473,41 +637,41 @@ public class JavaVideoDownloader {
     }
 
     private static String getLatestYtDlpVersion() {
-        System.out.println("Fetching latest yt-dlp version from GitHub API...");
-        try (InputStream in = new URL("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest").openStream();
-             BufferedReader reader = new BufferedReader(new InputStreamReader(in))) {
-            StringBuilder jsonResponse = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                jsonResponse.append(line);
-            }
-            Pattern pattern = Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
-            Matcher matcher = pattern.matcher(jsonResponse.toString());
-            if (matcher.find()) {
-                String version = matcher.group(1);
-                System.out.println("Latest yt-dlp version found on GitHub: " + version);
+        LOG.info("Fetching latest yt-dlp version from GitHub API...");
+        try {
+            HttpURLConnection conn = (HttpURLConnection) new URL("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest").openConnection();
+            conn.setRequestProperty("Accept", "application/vnd.github+json");
+            conn.setRequestProperty("User-Agent", USER_AGENT);
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                StringBuilder jsonResponse = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    jsonResponse.append(line);
+                }
+                String version = JSON.parseObject(jsonResponse.toString()).getString("tag_name");
+                LOG.info("Latest yt-dlp version found on GitHub: " + version);
                 return version;
-            } else {
-                System.err.println("Could not find 'tag_name' in GitHub API response.");
-                return null;
             }
         } catch (IOException e) {
-            System.err.println("Could not fetch latest yt-dlp version from GitHub API: " + e.getMessage());
+            LOG.warning("Could not fetch latest yt-dlp version from GitHub API: " + e.getMessage());
         }
         return null;
     }
 
     private static String readVersionFile() {
         if (!YTDLP_VERSION_FILE.exists()) {
-            System.out.println("yt-dlp version file not found.");
+            LOG.info("yt-dlp version file not found.");
             return null;
         }
         try {
             String version = Files.readString(YTDLP_VERSION_FILE.toPath()).trim();
-            System.out.println("Read yt-dlp version from file: " + version);
+            LOG.info("Read yt-dlp version from file: " + version);
             return version;
         } catch (IOException e) {
-            System.err.println("Error reading yt-dlp version file: " + e.getMessage());
+            LOG.warning("Error reading yt-dlp version file: " + e.getMessage());
             return null;
         }
     }
@@ -515,49 +679,46 @@ public class JavaVideoDownloader {
     private static void writeVersionFile(String version) {
         try {
             Files.writeString(YTDLP_VERSION_FILE.toPath(), version);
-            System.out.println("Wrote yt-dlp version '" + version + "' to file: " + YTDLP_VERSION_FILE.getAbsolutePath());
+            LOG.info("Wrote yt-dlp version '" + version + "' to file: " + YTDLP_VERSION_FILE.getAbsolutePath());
         } catch (IOException e) {
-            System.err.println("Error writing yt-dlp version file: " + e.getMessage());
+            LOG.warning("Error writing yt-dlp version file: " + e.getMessage());
         }
     }
 
     private static void checkAndDownloadFFMPEG() throws IOException {
-        System.out.println("Checking ffmpeg existence and version...");
+        LOG.info("Checking ffmpeg existence and version...");
         if (!FFMPEG_DIR.exists()) {
             FFMPEG_DIR.mkdirs();
-            System.out.println("Created ffmpeg directory: " + FFMPEG_DIR.getAbsolutePath());
+            LOG.info("Created ffmpeg directory: " + FFMPEG_DIR.getAbsolutePath());
         }
         cleanupOldFfmpegExtracts();
 
         if (FFMPEG_EXE.exists()) {
-            System.out.println("ffmpeg.exe already exists at: " + FFMPEG_EXE.getAbsolutePath());
+            LOG.info("ffmpeg.exe already exists at: " + FFMPEG_EXE.getAbsolutePath());
             return;
         }
 
-        System.out.println("ffmpeg not found, downloading zip from: " + FFMPEG_ZIP_URL);
+        LOG.info("ffmpeg not found, downloading zip from: " + FFMPEG_ZIP_URL);
 
         File zipFile = new File(FFMPEG_DIR, "ffmpeg.zip");
-        try (InputStream in = new URL(FFMPEG_ZIP_URL).openStream();
-             FileOutputStream out = new FileOutputStream(zipFile)) {
-            in.transferTo(out);
-            System.out.println("ffmpeg zip downloaded to: " + zipFile.getAbsolutePath());
-        }
+        downloadFile(FFMPEG_ZIP_URL, zipFile);
+        LOG.info("ffmpeg zip downloaded to: " + zipFile.getAbsolutePath());
 
-        System.out.println("Extracting ffmpeg from zip...");
+        LOG.info("Extracting ffmpeg from zip...");
         extractFfmpegFromZip(zipFile, FFMPEG_EXE);
         zipFile.delete();
-        System.out.println("ffmpeg zip deleted.");
+        LOG.info("ffmpeg zip deleted.");
 
         if (!FFMPEG_EXE.exists()) {
             throw new IOException("Не найден ffmpeg.exe внутри архива.");
         }
         FFMPEG_EXE.setExecutable(true, false);
 
-        System.out.println("ffmpeg installed to: " + FFMPEG_EXE.getAbsolutePath());
+        LOG.info("ffmpeg installed to: " + FFMPEG_EXE.getAbsolutePath());
     }
 
     private static void extractFfmpegFromZip(File zipFile, File outFile) throws IOException {
-        System.out.println("Attempting to extract ffmpeg.exe from " + zipFile.getName());
+        LOG.info("Attempting to extract ffmpeg.exe from " + zipFile.getName());
         try (ZipFile zf = new ZipFile(zipFile)) {
             Enumeration<? extends ZipEntry> entries = zf.entries();
             ZipEntry candidate = null;
@@ -567,20 +728,20 @@ public class JavaVideoDownloader {
                 String name = e.getName().replace('\\','/').toLowerCase();
                 if (!e.isDirectory() && name.endsWith("/bin/ffmpeg.exe")) {
                     candidate = e;
-                    System.out.println("Found ffmpeg.exe at: " + e.getName());
+                    LOG.info("Found ffmpeg.exe at: " + e.getName());
                     break;
                 }
             }
 
             if (candidate == null) {
-                System.out.println("ffmpeg.exe not found in /bin/ path, searching root...");
+                LOG.info("ffmpeg.exe not found in /bin/ path, searching root...");
                 Enumeration<? extends ZipEntry> entries2 = zf.entries();
                 while (entries2.hasMoreElements()) {
                     ZipEntry e = entries2.nextElement();
                     String name = e.getName().replace('\\','/').toLowerCase();
                     if (!e.isDirectory() && name.endsWith("ffmpeg.exe")) {
                         candidate = e;
-                        System.out.println("Found ffmpeg.exe at: " + e.getName() + " (root level)");
+                        LOG.info("Found ffmpeg.exe at: " + e.getName() + " (root level)");
                         break;
                     }
                 }
@@ -595,7 +756,7 @@ public class JavaVideoDownloader {
                 byte[] buffer = new byte[8192];
                 int len;
                 while ((len = is.read(buffer)) > 0) fos.write(buffer, 0, len);
-                System.out.println("ffmpeg.exe extracted successfully to: " + outFile.getAbsolutePath());
+                LOG.info("ffmpeg.exe extracted successfully to: " + outFile.getAbsolutePath());
             }
         }
     }
@@ -605,12 +766,12 @@ public class JavaVideoDownloader {
         if (!dir.exists()) return;
         File[] files = dir.listFiles();
         if (files == null) return;
-        System.out.println("Cleaning up old ffmpeg extracts in: " + dir.getAbsolutePath());
+        LOG.info("Cleaning up old ffmpeg extracts in: " + dir.getAbsolutePath());
         for (File f : files) {
             if (f.getName().equalsIgnoreCase("ffmpeg.exe") || f.getName().equalsIgnoreCase("ffmpeg.zip")) {
                 continue;
             }
-            System.out.println("Deleting old ffmpeg related file/directory: " + f.getAbsolutePath());
+            LOG.info("Deleting old ffmpeg related file/directory: " + f.getAbsolutePath());
             deleteRecursivelyQuiet(f);
         }
     }
@@ -627,9 +788,9 @@ public class JavaVideoDownloader {
         }
         try {
             f.delete();
-            System.out.println("Successfully deleted: " + f.getAbsolutePath());
+            LOG.fine("Successfully deleted: " + f.getAbsolutePath());
         } catch (Exception ignored) {
-            System.err.println("Failed to delete: " + f.getAbsolutePath());
+            LOG.warning("Failed to delete: " + f.getAbsolutePath());
         }
     }
 }

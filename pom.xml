@@ -7,7 +7,7 @@
 
     <groupId>org.example</groupId>
     <artifactId>MediaDownloader</artifactId>
-    <version>3.0.3</version>
+    <version>3.1.1</version>
 
     <build>
         <resources>
@@ -78,6 +78,12 @@
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark</artifactId>
             <version>0.24.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.18.3</version>
         </dependency>
     </dependencies>
 </project>

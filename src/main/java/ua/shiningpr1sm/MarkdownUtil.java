@@ -10,18 +10,6 @@ public class MarkdownUtil {
             .softbreak("<br/>\n")
             .build();
 
-    public static String toPlainText(String markdown) {
-        if (markdown == null) return "(no release notes)";
-        String result = markdown
-                .replaceAll("(?m)^#{1,6}\\s*", "")
-                .replaceAll("\\*\\*(.*?)\\*\\*", "$1")
-                .replaceAll("\\*(.*?)\\*", "$1")
-                .replaceAll("`([^`]*)`", "$1")
-                .replaceAll("(?m)^[-*]\\s+", "• ")
-                .trim();
-        return result.isEmpty() ? "(no release notes)" : result;
-    }
-
     public static String toHtml(String markdown) {
         if (markdown == null || markdown.isBlank()) return "<p>(no release notes)</p>";
         Node document = PARSER.parse(markdown);

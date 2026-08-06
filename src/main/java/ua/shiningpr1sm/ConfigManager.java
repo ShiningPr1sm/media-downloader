@@ -1,6 +1,7 @@
 package ua.shiningpr1sm;
 
 import java.io.*;
+import java.net.URL;
 import java.nio.file.*;
 import java.util.Properties;
 
@@ -58,7 +59,18 @@ public class ConfigManager {
         saveConfig(props);
     }
 
+    public static boolean isDevMode() {
+        try {
+            URL location = ConfigManager.class.getProtectionDomain().getCodeSource().getLocation();
+            return location != null && !location.getPath().toLowerCase().endsWith(".jar");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static String getInternalVersion() {
+        if (isDevMode()) return "dev";
+
         Properties props = new Properties();
         InputStream is = ConfigManager.class.getResourceAsStream("/project.properties");
         if (is == null) {

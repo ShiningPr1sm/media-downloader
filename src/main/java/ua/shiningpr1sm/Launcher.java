@@ -12,11 +12,14 @@ public class Launcher {
 
         SwingUtilities.invokeLater(JavaVideoDownloader::new);
 
-        Thread updateCheck = new Thread(() -> checkForUpdates(currentVer), "update-check");
-        updateCheck.start();
+        if (!ConfigManager.isDevMode()) {
+            Thread updateCheck = new Thread(() -> checkForUpdates(currentVer), "update-check");
+            updateCheck.start();
+        }
     }
 
     private static void checkForUpdates(String currentVer) {
+        if (ConfigManager.isDevMode()) return;
         try {
             UpdateManager updateManager = new UpdateManager();
             UpdateManager.ReleaseInfo release = updateManager.fetchLatestRelease();

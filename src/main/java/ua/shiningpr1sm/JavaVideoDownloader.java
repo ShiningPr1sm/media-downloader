@@ -55,7 +55,11 @@ public class JavaVideoDownloader {
 
         String currentVer = ConfigManager.getInternalVersion();
         JFrame frame = new JFrame();
-        frame.setTitle(String.format("Media Downloader  |  v%s", currentVer));
+        if (ConfigManager.isDevMode()) {
+            frame.setTitle(String.format("Media Downloader  |  %s", currentVer));
+        } else {
+            frame.setTitle(String.format("Media Downloader  |  v%s", currentVer));
+        }
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
         frame.setSize(550, 300);

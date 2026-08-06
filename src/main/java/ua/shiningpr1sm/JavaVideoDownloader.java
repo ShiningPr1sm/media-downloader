@@ -14,6 +14,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.List;
 import java.util.logging.Level;
@@ -25,7 +27,7 @@ import java.util.zip.ZipFile;
 
 public class JavaVideoDownloader {
     private static final Logger LOG = Logger.getLogger(JavaVideoDownloader.class.getName());
-    private static final String USER_AGENT = "MediaDownloader/3.0.3";
+    private static final String USER_AGENT = "MediaDownloader/" + ConfigManager.getInternalVersion();
 
     private static final String COMPANY_NAME = "ShiningPr1sm";
     private static final String APPDATA = System.getenv("APPDATA");
@@ -33,7 +35,6 @@ public class JavaVideoDownloader {
 
     private static final File YTDLP_DIR = new File(SHARED_ROOT, "yt-dlp");
     private static final File YTDLP_EXE = new File(YTDLP_DIR, "yt-dlp.exe");
-    private static final File YTDLP_VERSION_FILE = new File(YTDLP_DIR, "version.txt");
     private static final String YTDLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
 
     private static final File FFMPEG_DIR = new File(SHARED_ROOT, "ffmpeg");
@@ -582,14 +583,21 @@ public class JavaVideoDownloader {
     }
 
     private static void downloadFile(String urlStr, File target) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(30000);
-        conn.setInstanceFollowRedirects(true);
-        conn.setRequestProperty("User-Agent", USER_AGENT);
-        try (InputStream in = conn.getInputStream();
-             FileOutputStream out = new FileOutputStream(target)) {
-            in.transferTo(out);
+        Path targetPath = target.toPath();
+        Path temp = Files.createTempFile(targetPath.getParent(), target.getName() + ".", ".part");
+        try {
+            HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestProperty("User-Agent", USER_AGENT);
+            try (InputStream in = conn.getInputStream();
+                 FileOutputStream out = new FileOutputStream(temp.toFile())) {
+                in.transferTo(out);
+            }
+            Files.move(temp, targetPath, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temp);
         }
     }
 
@@ -600,70 +608,42 @@ public class JavaVideoDownloader {
             LOG.info("Created yt-dlp directory: " + YTDLP_DIR.getAbsolutePath());
         }
 
-        String storedVersion = readVersionFile();
-        String latestVersion = getLatestYtDlpVersion();
         String currentInstalledVersion = null;
-
-        boolean needsDownload = false;
-
         if (YTDLP_EXE.exists()) {
             try {
                 Process process = new ProcessBuilder(YTDLP_EXE.getAbsolutePath(), "--version").start();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                currentInstalledVersion = reader.readLine();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                    currentInstalledVersion = reader.readLine();
+                }
                 process.waitFor();
-                LOG.info("Currently installed yt-dlp version from executable: " + currentInstalledVersion);
+                LOG.info("Currently installed yt-dlp version: " + currentInstalledVersion);
             } catch (Exception e) {
-                LOG.warning("Failed to get current installed yt-dlp version from executable. Forcing download. Error: " + e.getMessage());
-                needsDownload = true;
+                LOG.warning("Failed to get installed yt-dlp version. Will re-download. Error: " + e.getMessage());
             }
         } else {
             LOG.info("yt-dlp.exe not found. Needs download.");
-            needsDownload = true;
         }
 
+        String latestVersion = getLatestYtDlpVersion();
         if (latestVersion == null) {
-            LOG.warning("Could not fetch latest yt-dlp version from GitHub. Skipping online version check.");
-            if (!needsDownload && storedVersion != null && storedVersion.equals(currentInstalledVersion)) {
-                LOG.info("yt-dlp is assumed to be up to date (cannot check online). Installed: " + currentInstalledVersion);
-            } else if (!YTDLP_EXE.exists() && storedVersion == null) {
-                needsDownload = true;
-                LOG.info("No yt-dlp.exe and no stored version, and cannot get latest online. Attempting download.");
+            if (YTDLP_EXE.exists()) {
+                LOG.warning("Could not fetch latest yt-dlp version (offline?). Using existing executable.");
+                return;
             }
-        } else {
-            LOG.info("Latest yt-dlp version from GitHub: " + latestVersion);
-
-            if (currentInstalledVersion != null && currentInstalledVersion.equals(latestVersion) &&
-                    storedVersion != null && storedVersion.equals(latestVersion)) {
-                LOG.info("yt-dlp is up to date according to version file, installed version, and latest online (" + latestVersion + "). No download needed.");
-                needsDownload = false;
-            } else {
-                LOG.info("yt-dlp update required: stored=" + storedVersion + ", installed=" + currentInstalledVersion + ", latest=" + latestVersion);
-                needsDownload = true;
-            }
-        }
-
-        if (needsDownload) {
-            LOG.info("Downloading latest yt-dlp from: " + YTDLP_URL);
+            LOG.warning("Could not fetch latest yt-dlp version and no executable present. Attempting download.");
             downloadFile(YTDLP_URL, YTDLP_EXE);
-            YTDLP_EXE.setExecutable(true);
-            LOG.info("yt-dlp updated successfully.");
-
-            String versionToWrite = latestVersion;
-            if (versionToWrite == null) {
-                try {
-                    Process process = new ProcessBuilder(YTDLP_EXE.getAbsolutePath(), "--version").start();
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                    versionToWrite = reader.readLine();
-                    process.waitFor();
-                    LOG.info("Version from newly downloaded yt-dlp.exe: " + versionToWrite);
-                } catch (Exception e) {
-                    LOG.warning("Could not get version from newly downloaded yt-dlp.exe: " + e.getMessage());
-                    versionToWrite = "unknown_download";
-                }
-            }
-            writeVersionFile(versionToWrite != null ? versionToWrite : "unknown_fallback");
+            return;
         }
+
+        if (YTDLP_EXE.exists() && latestVersion.equals(currentInstalledVersion)) {
+            LOG.info("yt-dlp is up to date (" + latestVersion + "). No download needed.");
+            return;
+        }
+
+        LOG.info("yt-dlp update required: installed=" + currentInstalledVersion + ", latest=" + latestVersion);
+        downloadFile(YTDLP_URL, YTDLP_EXE);
+        YTDLP_EXE.setExecutable(true);
+        LOG.info("yt-dlp updated successfully.");
     }
 
     private static String getLatestYtDlpVersion() {
@@ -689,30 +669,6 @@ public class JavaVideoDownloader {
             LOG.warning("Could not fetch latest yt-dlp version from GitHub API: " + e.getMessage());
         }
         return null;
-    }
-
-    private static String readVersionFile() {
-        if (!YTDLP_VERSION_FILE.exists()) {
-            LOG.info("yt-dlp version file not found.");
-            return null;
-        }
-        try {
-            String version = Files.readString(YTDLP_VERSION_FILE.toPath()).trim();
-            LOG.info("Read yt-dlp version from file: " + version);
-            return version;
-        } catch (IOException e) {
-            LOG.warning("Error reading yt-dlp version file: " + e.getMessage());
-            return null;
-        }
-    }
-
-    private static void writeVersionFile(String version) {
-        try {
-            Files.writeString(YTDLP_VERSION_FILE.toPath(), version);
-            LOG.info("Wrote yt-dlp version '" + version + "' to file: " + YTDLP_VERSION_FILE.getAbsolutePath());
-        } catch (IOException e) {
-            LOG.warning("Error writing yt-dlp version file: " + e.getMessage());
-        }
     }
 
     private static void checkAndDownloadFFMPEG() throws IOException {

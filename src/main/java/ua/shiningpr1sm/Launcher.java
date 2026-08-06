@@ -22,7 +22,7 @@ public class Launcher {
             UpdateManager.ReleaseInfo release = updateManager.fetchLatestRelease();
             if (release == null || updateManager.compareVersions(release.version(), currentVer) <= 0) {
                 return;
-
+            }
 
             if (release.version().equals(ConfigManager.loadSkippedVersion())) {
                 System.out.println("Version " + release.version() + " skipped by user");

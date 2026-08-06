@@ -13,10 +13,15 @@ import java.time.Duration;
 
 public class UpdateManager {
 
-    private static final String API_URL = "https://api.github.com/repos/ShiningPr1sm/Media-Downloader/releases/latest";
+    private static final String DEFAULT_API_URL = "https://api.github.com/repos/ShiningPr1sm/Media-Downloader/releases/latest";
+    private static final String API_URL_PROPERTY = "media-downloader.apiUrl";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     public record ReleaseInfo(String version, String notesMarkdown, String downloadUrl) {}
+
+    static String apiUrl() {
+        return System.getProperty(API_URL_PROPERTY, DEFAULT_API_URL);
+    }
 
     public ReleaseInfo fetchLatestRelease() {
         try {
@@ -24,7 +29,7 @@ public class UpdateManager {
                     .connectTimeout(Duration.ofSeconds(10))
                     .build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(API_URL))
+                    .uri(URI.create(apiUrl()))
                     .header("Accept", "application/vnd.github+json")
                     .header("User-Agent", "MediaDownloader")
                     .timeout(Duration.ofSeconds(10))
@@ -33,7 +38,16 @@ public class UpdateManager {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) return null;
 
-            JsonNode root = MAPPER.readTree(response.body());
+            return parseRelease(response.body());
+        } catch (Exception e) {
+            System.err.println("UpdateManager: failed to fetch release: " + e.getMessage());
+            return null;
+        }
+    }
+
+    static ReleaseInfo parseRelease(String json) {
+        try {
+            JsonNode root = MAPPER.readTree(json);
 
             String tagName = root.path("tag_name").asText(null);
             if (tagName == null) return null;
@@ -52,8 +66,8 @@ public class UpdateManager {
             if (downloadUrl == null) return null;
 
             return new ReleaseInfo(version, notes, downloadUrl);
-        } catch (Exception e) {
-            System.err.println("UpdateManager: failed to fetch release: " + e.getMessage());
+        } catch (IOException e) {
+            System.err.println("UpdateManager: failed to parse release JSON: " + e.getMessage());
             return null;
         }
     }

@@ -18,10 +18,17 @@ public class UpdateApplier {
         }
 
         Path scriptPath = currentJarPath.getParent().resolve("update.bat");
+        String script = buildScript(currentJarPath, tempJar);
+        Files.writeString(scriptPath, script);
+        new ProcessBuilder("cmd", "/c", scriptPath.toString()).start();
+        System.exit(0);
+    }
+
+    static String buildScript(Path currentJarPath, Path tempJar) {
         String current = currentJarPath.toString();
         String temp = tempJar.toAbsolutePath().toString();
 
-        String script = "@echo off\r\n"
+        return "@echo off\r\n"
                 + "set \"JAR=" + current + "\"\r\n"
                 + "set \"TMP=" + temp + "\"\r\n"
                 + ":loop\r\n"
@@ -33,8 +40,5 @@ public class UpdateApplier {
                 + "move /y \"%TMP%\" \"%JAR%\"\r\n"
                 + "start \"\" javaw -jar \"%JAR%\"\r\n"
                 + "start /b \"\" cmd /c del \"%~f0\" & exit\r\n";
-        Files.writeString(scriptPath, script);
-        new ProcessBuilder("cmd", "/c", scriptPath.toString()).start();
-        System.exit(0);
     }
 }

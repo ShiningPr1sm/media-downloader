@@ -1,6 +1,7 @@
 package ua.shiningpr1sm;
 
-import com.alibaba.fastjson.JSON;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.formdev.flatlaf.FlatLightLaf;
 
 import javax.imageio.ImageIO;
@@ -655,13 +656,9 @@ public class JavaVideoDownloader {
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(10000);
 
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-                StringBuilder jsonResponse = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    jsonResponse.append(line);
-                }
-                String version = JSON.parseObject(jsonResponse.toString()).getString("tag_name");
+            try (InputStream in = conn.getInputStream()) {
+                JsonNode root = new ObjectMapper().readTree(in);
+                String version = root.path("tag_name").asText(null);
                 LOG.info("Latest yt-dlp version found on GitHub: " + version);
                 return version;
             }

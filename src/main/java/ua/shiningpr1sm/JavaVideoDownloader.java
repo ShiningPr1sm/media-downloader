@@ -42,6 +42,7 @@ public class JavaVideoDownloader {
 
     private volatile Process currentProcess;
     private volatile boolean cancelled;
+    private volatile boolean busy;
 
     public JavaVideoDownloader() {
         try {
@@ -184,6 +185,24 @@ public class JavaVideoDownloader {
         frame.add(bottomPanel, BorderLayout.SOUTH);
         frame.setVisible(true);
 
+        Runnable setBusyUi = () -> {
+            busy = true;
+            downloadButton.setEnabled(false);
+            thumbnailButton.setEnabled(false);
+            formatBox.setEnabled(false);
+            browserComboBox.setEnabled(false);
+            cancelButton.setEnabled(true);
+        };
+
+        Runnable resetUi = () -> {
+            busy = false;
+            downloadButton.setEnabled(true);
+            thumbnailButton.setEnabled(true);
+            formatBox.setEnabled(true);
+            browserComboBox.setEnabled(true);
+            cancelButton.setEnabled(false);
+        };
+
         cancelButton.addActionListener(ev -> {
             cancelled = true;
             Process p = currentProcess;
@@ -195,6 +214,10 @@ public class JavaVideoDownloader {
         });
 
         downloadButton.addActionListener(e -> {
+            if (busy) {
+                LOG.warning("Download ignored: another operation is already running");
+                return;
+            }
             String input = textArea.getText().trim();
             if (input.isEmpty() || input.equals(textarea_placeholder)) {
                 JOptionPane.showMessageDialog(frame,
@@ -240,18 +263,28 @@ public class JavaVideoDownloader {
             }
 
             cancelled = false;
-            downloadButton.setEnabled(false);
-            cancelButton.setEnabled(true);
+            setBusyUi.run();
             progressBar.setValue(0);
             progressBar.setString("Starting download...");
             LOG.info("Starting download process for " + videoUrls.size() + " URLs.");
 
             new Thread(() -> {
                 try {
-                    if (cancelled) return;
+                    if (cancelled) {
+                        SwingUtilities.invokeLater(() -> {
+                            progressBar.setValue(0);
+                            progressBar.setString("Cancelled");
+                            resetUi.run();
+                        });
+                        return;
+                    }
                     checkAndDownloadYTDLP();
                     if (cancelled) {
-                        restoreButtons(downloadButton, cancelButton, progressBar);
+                        SwingUtilities.invokeLater(() -> {
+                            progressBar.setValue(0);
+                            progressBar.setString("Cancelled");
+                            resetUi.run();
+                        });
                         return;
                     }
                     checkAndDownloadFFMPEG();
@@ -362,16 +395,14 @@ public class JavaVideoDownloader {
                     SwingUtilities.invokeLater(() -> {
                         progressBar.setValue(wasCancelled ? 0 : 100);
                         progressBar.setString(wasCancelled ? "Download cancelled" : "All downloads completed!");
-                        downloadButton.setEnabled(true);
-                        cancelButton.setEnabled(false);
+                        resetUi.run();
                         LOG.info(wasCancelled ? "Download cancelled" : "All downloads completed!");
                     });
                 } catch (IOException | InterruptedException ex) {
                     LOG.log(Level.SEVERE, "An error occurred during download", ex);
                     SwingUtilities.invokeLater(() -> {
                         progressBar.setString("Error: " + ex.getMessage());
-                        downloadButton.setEnabled(true);
-                        cancelButton.setEnabled(false);
+                        resetUi.run();
                         JOptionPane.showMessageDialog(frame, "An error occurred: " + ex.getMessage());
                     });
                 }
@@ -379,6 +410,10 @@ public class JavaVideoDownloader {
         });
 
         thumbnailButton.addActionListener(e -> {
+            if (busy) {
+                LOG.warning("Thumbnail download ignored: another operation is already running");
+                return;
+            }
             String input = textArea.getText().trim();
             if (input.isEmpty() || input.equals(textarea_placeholder)) {
                 JOptionPane.showMessageDialog(frame,
@@ -423,15 +458,21 @@ public class JavaVideoDownloader {
             }
 
             cancelled = false;
-            thumbnailButton.setEnabled(false);
-            cancelButton.setEnabled(true);
+            setBusyUi.run();
             progressBar.setValue(0);
             progressBar.setString("Starting thumbnail download...");
             LOG.info("Starting thumbnail download for " + videoUrls.size() + " URLs.");
 
             new Thread(() -> {
                 try {
-                    if (cancelled) return;
+                    if (cancelled) {
+                        SwingUtilities.invokeLater(() -> {
+                            progressBar.setValue(0);
+                            progressBar.setString("Cancelled");
+                            resetUi.run();
+                        });
+                        return;
+                    }
                     checkAndDownloadYTDLP();
 
                     for (int i = 0; i < videoUrls.size(); i++) {
@@ -488,29 +529,18 @@ public class JavaVideoDownloader {
                     SwingUtilities.invokeLater(() -> {
                         progressBar.setValue(wasCancelled ? 0 : 100);
                         progressBar.setString(wasCancelled ? "Thumbnail download cancelled" : "All thumbnails downloaded!");
-                        thumbnailButton.setEnabled(true);
-                        cancelButton.setEnabled(false);
+                        resetUi.run();
                         LOG.info(wasCancelled ? "Thumbnail download cancelled" : "All thumbnails downloaded!");
                     });
                 } catch (IOException | InterruptedException ex) {
                     LOG.log(Level.SEVERE, "Thumbnail download error", ex);
                     SwingUtilities.invokeLater(() -> {
                         progressBar.setString("Error: " + ex.getMessage());
-                        thumbnailButton.setEnabled(true);
-                        cancelButton.setEnabled(false);
+                        resetUi.run();
                         JOptionPane.showMessageDialog(frame, "An error occurred: " + ex.getMessage());
                     });
                 }
             }).start();
-        });
-    }
-
-    private static void restoreButtons(JButton actionButton, JButton cancelBtn, JProgressBar bar) {
-        SwingUtilities.invokeLater(() -> {
-            bar.setValue(0);
-            bar.setString("Cancelled");
-            actionButton.setEnabled(true);
-            cancelBtn.setEnabled(false);
         });
     }
 

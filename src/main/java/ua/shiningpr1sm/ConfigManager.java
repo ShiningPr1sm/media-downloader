@@ -6,6 +6,11 @@ import java.nio.file.*;
 import java.util.Properties;
 
 public class ConfigManager {
+
+    private ConfigManager() {
+        /* This utility class should not be instantiated */
+    }
+
     private static final String APP_NAME = "ShiningPr1sm/MediaDownloader";
     private static final String CONFIG_FILE = "config.properties";
 

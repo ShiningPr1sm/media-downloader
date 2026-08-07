@@ -6,7 +6,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 public class UpdateApplier {
-    public void restartWithNewJar(Path tempJar) throws IOException, InterruptedException {
+    public void restartWithNewJar(Path tempJar) throws IOException {
         Path currentJarPath;
         try {
             currentJarPath = Paths.get(

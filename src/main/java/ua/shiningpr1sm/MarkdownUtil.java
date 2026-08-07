@@ -5,6 +5,11 @@ import org.commonmark.parser.Parser;
 import org.commonmark.renderer.html.HtmlRenderer;
 
 public class MarkdownUtil {
+
+    private MarkdownUtil() {
+        /* This utility class should not be instantiated */
+    }
+
     private static final Parser PARSER = Parser.builder().build();
     private static final HtmlRenderer RENDERER = HtmlRenderer.builder()
             .softbreak("<br/>\n")

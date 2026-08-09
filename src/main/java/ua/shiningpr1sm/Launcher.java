@@ -41,6 +41,11 @@ public class Launcher {
                 return;
             }
 
+            if (choice[0] == SwingUpdatePrompt.Choice.SKIP) {
+                ConfigManager.saveSkippedVersion(release.version());
+                System.out.println("Version " + release.version() + " skipped by user");
+                return;
+            }
             if (choice[0] != SwingUpdatePrompt.Choice.UPDATE) {
                 return;
             }

@@ -1,9 +1,14 @@
 package ua.shiningpr1sm;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Properties;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class ConfigManager {
 
@@ -11,57 +16,53 @@ public class ConfigManager {
         /* This utility class should not be instantiated */
     }
 
+    private static final Logger LOG = Logger.getLogger(ConfigManager.class.getName());
+
     private static final String APP_NAME = "ShiningPr1sm/MediaDownloader";
     private static final String CONFIG_FILE = "config.properties";
+    private static final String VERSION_FILE = "version.txt";
 
     public static Path getConfigPath() {
-        return Paths.get(System.getenv("APPDATA"), APP_NAME, CONFIG_FILE);
+        String appData = System.getenv("APPDATA");
+        if (appData == null || appData.isBlank()) {
+            appData = System.getProperty("user.home");
+        }
+        return Paths.get(appData, APP_NAME, CONFIG_FILE);
+    }
+
+    public static Path getVersionFilePath() {
+        return getConfigPath().getParent().resolve(VERSION_FILE);
     }
 
     public static void initConfig() {
-        Path path = getConfigPath();
+        Path dir = getConfigPath().getParent();
         try {
-            if (Files.notExists(path.getParent())) Files.createDirectories(path.getParent());
-            if (Files.notExists(path)) {
-                Properties props = new Properties();
-                props.setProperty("version", "1.0.0");
-                try (OutputStream out = Files.newOutputStream(path)) {
-                    props.store(out, null);
-                }
-            }
+            if (Files.notExists(dir)) Files.createDirectories(dir);
         } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    public static Properties loadConfig() {
-        Properties props = new Properties();
-        Path path = getConfigPath();
-        try (InputStream is = Files.newInputStream(path)) {
-            props.load(is);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return props;
-    }
-
-    public static void saveConfig(Properties props) {
-        Path path = getConfigPath();
-        try (OutputStream out = Files.newOutputStream(path)) {
-            props.store(out, null);
-        } catch (IOException e) {
-            e.printStackTrace();
+            LOG.log(Level.WARNING, "Failed to create config directory at " + dir, e);
         }
     }
 
     public static String loadSkippedVersion() {
-        return loadConfig().getProperty("skippedVersion", "");
+        Path file = getVersionFilePath();
+        try {
+            if (Files.exists(file)) {
+                return Files.readString(file).trim();
+            }
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Failed to read skipped version from " + file, e);
+        }
+        return "";
     }
 
     public static void saveSkippedVersion(String version) {
-        Properties props = loadConfig();
-        props.setProperty("skippedVersion", version);
-        saveConfig(props);
+        Path file = getVersionFilePath();
+        try {
+            initConfig();
+            Files.writeString(file, version);
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Failed to save skipped version to " + file, e);
+        }
     }
 
     public static boolean isDevMode() {
@@ -94,7 +95,7 @@ public class ConfigManager {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            LOG.log(Level.WARNING, "Failed to read app version from project.properties", e);
         }
         return "UNKNOWN_VERSION";
     }

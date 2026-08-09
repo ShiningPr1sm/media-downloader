@@ -10,12 +10,16 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class UpdateManager {
 
     private static final String DEFAULT_API_URL = "https://api.github.com/repos/ShiningPr1sm/Media-Downloader/releases/latest";
     private static final String API_URL_PROPERTY = "media-downloader.apiUrl";
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private static final Logger LOG = Logger.getLogger(ConfigManager.class.getName());
 
     public record ReleaseInfo(String version, String notesMarkdown, String downloadUrl) {}
 
@@ -40,7 +44,7 @@ public class UpdateManager {
 
             return parseRelease(response.body());
         } catch (Exception e) {
-            System.err.println("UpdateManager: failed to fetch release: " + e.getMessage());
+            LOG.log(Level.WARNING, "Error while fetching latest release", e);
             return null;
         }
     }
@@ -67,7 +71,7 @@ public class UpdateManager {
 
             return new ReleaseInfo(version, notes, downloadUrl);
         } catch (IOException e) {
-            System.err.println("UpdateManager: failed to parse release JSON: " + e.getMessage());
+            LOG.log(Level.WARNING, "Error while parsing JSON response", e);
             return null;
         }
     }
@@ -85,7 +89,7 @@ public class UpdateManager {
 
     private int parsePart(String part) {
         try {
-            return Integer.parseInt(part.replaceAll("[^0-9]", ""));
+            return Integer.parseInt(part.replaceAll("\\D", ""));
         } catch (NumberFormatException e) {
             return 0;
         }

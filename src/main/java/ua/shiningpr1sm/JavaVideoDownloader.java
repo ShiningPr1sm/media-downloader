@@ -82,6 +82,11 @@ public class JavaVideoDownloader {
     private volatile boolean busy;
 
     public JavaVideoDownloader() {
+        LOG.setLevel(Level.FINE);
+        for (java.util.logging.Handler h : Logger.getLogger("").getHandlers()) {
+            h.setLevel(Level.FINE);
+        }
+
         try {
             UIManager.setLookAndFeel(new FlatLightLaf());
         } catch (UnsupportedLookAndFeelException e) {
@@ -351,6 +356,9 @@ public class JavaVideoDownloader {
                                 command.add("mp4");
                                 command.add("--remux-video");
                                 command.add("mp4");
+                                command.add("--referer");
+                                command.add("https://example.com");
+                                command.add("-v");
                                 command.add("--ffmpeg-location");
                                 command.add(FFMPEG_EXE.getAbsolutePath());
                                 if (!browser.isEmpty() && !browser.equals("none")) {
@@ -364,6 +372,9 @@ public class JavaVideoDownloader {
                                 command.add("bestvideo[ext=mp4]/bestvideo/best");
                                 command.add("--remux-video");
                                 command.add("mp4");
+                                command.add("--referer");
+                                command.add("https://example.com");
+                                command.add("-v");
                                 command.add("--ffmpeg-location");
                                 command.add(FFMPEG_EXE.getAbsolutePath());
                                 if (!browser.isEmpty() && !browser.equals("none")) {
@@ -378,6 +389,9 @@ public class JavaVideoDownloader {
                                 command.add("--extract-audio");
                                 command.add("--audio-format");
                                 command.add("mp3");
+                                command.add("--referer");
+                                command.add("https://example.com");
+                                command.add("-v");
                                 command.add("--ffmpeg-location");
                                 command.add(FFMPEG_EXE.getAbsolutePath());
                                 if (!browser.isEmpty() && !browser.equals("none")) {
